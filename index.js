@@ -45,10 +45,13 @@ const copyToSharedMemoryChunked = (
   inputLength,
   outputChunkSeconds,
   outputChunkIntervalSeconds,
+  syncStartRange,
+  syncEndRange,
+  sampleRate,
 ) => {
   const sharedMemories = [];
-  const samplesPerChunk = 48000 * outputChunkSeconds;
-  const samplesToSkip = 48000 * outputChunkIntervalSeconds;
+  const samplesPerChunk = sampleRate * outputChunkSeconds;
+  const samplesToSkip = sampleRate * outputChunkIntervalSeconds;
 
   let sharedMemory = null;
 
@@ -74,6 +77,14 @@ const copyToSharedMemoryChunked = (
       sharedMemories.push({
         start: nextStart,
         end: nextEnd,
+        syncStart:
+          Math.round(
+            sharedMemories.length * outputChunkIntervalSeconds - syncStartRange,
+          ) * sampleRate,
+        syncEnd:
+          Math.round(
+            sharedMemories.length * outputChunkIntervalSeconds + syncEndRange,
+          ) * sampleRate,
         data: sharedMemory,
       });
       sharedMemoryPosition = 0;
@@ -112,7 +123,14 @@ const copyToSharedMemory = (inputChunks, inputLength) => {
   return sharedMemory;
 };
 
-const decodeAndSave = (inputFile, chunkSize = 0, chunkInterval = 0) => {
+const decodeAndSave = (
+  inputFile,
+  chunkSize = 0,
+  chunkInterval = 0,
+  syncStartRange,
+  syncEndRange,
+  sampleRate,
+) => {
   return new Promise(async (resolve, reject) => {
     const outputChunks = [];
     let outputSamples = 0;
@@ -153,6 +171,9 @@ const decodeAndSave = (inputFile, chunkSize = 0, chunkInterval = 0) => {
                   outputSamples,
                   chunkSize,
                   chunkInterval,
+                  syncStartRange,
+                  syncEndRange,
+                  sampleRate,
                 ),
           );
         });
@@ -164,15 +185,39 @@ const decodeAndSave = (inputFile, chunkSize = 0, chunkInterval = 0) => {
   });
 };
 
-function removeOutliers(data) {
-  const differences = data.map((d) => d.difference).sort((a, b) => a - b);
-  const q1 = differences[Math.floor(differences.length * 0.25)];
-  const q3 = differences[Math.floor(differences.length * 0.75)];
-  const iqr = q3 - q1;
-  const lower = q1 - 1.5 * iqr;
-  const upper = q3 + 1.5 * iqr;
+function removeOutliers(data, tolerance = 0.5) {
+  // Step 1: Build frequency map of rounded differences
+  const freqMap = {};
 
-  return data.filter((d) => d.difference >= lower && d.difference <= upper);
+  for (const item of data) {
+    const rounded = Math.round(item.difference * 10) / 10;
+    freqMap[rounded] = (freqMap[rounded] || 0) + 1;
+  }
+
+  // Step 2: Find the mode (most common rounded value)
+  let mode = null;
+  let maxCount = -1;
+
+  for (const [valueStr, count] of Object.entries(freqMap)) {
+    const value = parseFloat(valueStr);
+    if (count > maxCount) {
+      maxCount = count;
+      mode = value;
+    }
+  }
+
+  // Step 3: Define bounds around the mode (±0.5)
+  const lowerBound = mode - tolerance;
+  const upperBound = mode + tolerance;
+
+  // Step 4: Split data into good values and outliers
+  const goodValues = data.filter(
+    (item) => item.difference >= lowerBound && item.difference <= upperBound,
+  );
+  const outliers = data.filter(
+    (item) => item.difference < lowerBound || item.difference > upperBound,
+  );
+  return goodValues
 }
 
 function weightedLinearRegression(data) {
@@ -203,8 +248,8 @@ function weightedLinearRegression(data) {
   return { slope, intercept };
 }
 
-function simpleLinearRegression(data) {
-  const cleaned = removeOutliers(data);
+function simpleLinearRegression(data, maxRateTolerance) {
+  const cleaned = removeOutliers(data, maxRateTolerance);
   const n = cleaned.length;
   let sumX = 0,
     sumY = 0,
@@ -226,25 +271,22 @@ function simpleLinearRegression(data) {
   return { slope, intercept };
 }
 
-const runSox = (soxArgs) => {
-  return new Promise((resolve, reject) => {
-    const sox = spawn("sox", soxArgs);
-
-    sox.stdout.on("data", (data) => {
-      console.log(`stdout: ${data}`);
+const runCmd = (cmd, args) => {
+  const spawned = spawn(cmd, args);
+  const promise = new Promise((resolve, reject) => {
+    spawned.stderr.on("data", (data) => {
+      process.stderr.write(data);
     });
 
-    sox.stderr.on("data", (data) => {
-      console.error(`stderr: ${data}`);
-    });
-
-    sox.on("close", (code) => {
+    spawned.on("close", (code) => {
       if (code !== 0) {
-        console.error(`SoX exited with code ${code}`);
+        console.error(`${cmd} ${args.join(" ")} exit code ${code}`);
       }
-      resolve();
+      resolve(code);
     });
   });
+
+  return { promise, stdin: spawned.stdin, stdout: spawned.stdout };
 };
 
 const trimAndResample = async (
@@ -253,16 +295,20 @@ const trimAndResample = async (
   startSeconds,
   endSeconds,
   rate,
+  sampleRate,
+  bitDepth,
+  channelCount,
+  flacThreads,
 ) => {
-  const tempTrimmed = outputFile + "trimmed.tmp.flac";
-  const tempTrimmedLeft = outputFile + "trimmed.tmp.l.flac";
-  const tempTrimmedRight = outputFile + "trimmed.tmp.r.flac";
-  const tempTrimmedLeftNorm = outputFile + "trimmed.tmp.l.norm.flac";
-  const tempTrimmedRightNorm = outputFile + "trimmed.tmp.r.norm.flac";
+  const tempFiles = [];
+
   try {
     // resample
     console.log("Adjusting speed...");
-    await runSox([
+
+    const tempTrimmed = outputFile + ".tmp.flac";
+    tempFiles.push(tempTrimmed);
+    await runCmd("sox", [
       inputFile,
       tempTrimmed,
       "rate",
@@ -271,33 +317,76 @@ const trimAndResample = async (
       startSeconds,
       "speed",
       rate,
-    ]);
+    ]).promise;
 
     // amplify each channel
     console.log("Normalizing...");
-    await Promise.all([
-      runSox([tempTrimmed, "-c", "1", tempTrimmedLeft, "trim", "0", endSeconds, "remix", "1"]).then(() =>
-        runSox([tempTrimmedLeft, tempTrimmedLeftNorm, "--norm"]),
-      ),
-      runSox([tempTrimmed, "-c", "1", tempTrimmedRight, "trim", "0", endSeconds, "remix", "2"]).then(
-        () => runSox([tempTrimmedRight, tempTrimmedRightNorm, "--norm"]),
-      ),
-    ]);
+    const normalizePromises = [];
+    const normalizeOutputFiles = [];
+    for (let i = 1; i <= channelCount; i++) {
+      const channelFile = `${outputFile}.tmp.${i}.flac`;
+      const normalizedFile = `${outputFile}.tmp.norm.${i}.flac`;
+
+      tempFiles.push(channelFile);
+      tempFiles.push(normalizedFile);
+      normalizeOutputFiles.push(normalizedFile);
+      normalizePromises.push(
+        runCmd("sox", [
+          tempTrimmed,
+          "-c",
+          "1",
+          channelFile,
+          "trim",
+          "0",
+          endSeconds,
+          "remix",
+          i,
+        ]).promise.then(
+          () => runCmd("sox", [channelFile, normalizedFile, "--norm"]).promise,
+        ),
+      );
+    }
+    await Promise.all(normalizePromises);
 
     console.log("Writing output file...");
-    await runSox([
+    const { promise: soxPromise, stdout: soxStdout } = runCmd("sox", [
       "--combine",
       "merge",
-      tempTrimmedLeftNorm,
-      tempTrimmedRightNorm,
+      ...normalizeOutputFiles,
+      "-t",
+      "raw",
+      "-r",
+      sampleRate,
+      "-c",
+      channelCount,
+      "-e",
+      "signed",
+      "-b",
+      bitDepth,
+      "-",
+    ]);
+    const { promise: flacPromise, stdin: flacStdin } = runCmd("flac", [
+      "--endian=little",
+      "--sign=signed",
+      "--bps=" + bitDepth,
+      "--channels=" + channelCount,
+      "--sample-rate=" + sampleRate,
+      "-8",
+      "-p",
+      "-e",
+      "-j",
+      flacThreads,
+      "-",
+      "-f",
+      "-o",
       outputFile,
     ]);
+    soxStdout.pipe(flacStdin);
+    await flacPromise;
+  } catch (e) {
+    console.log(e);
   } finally {
-    fs.promises.rm(tempTrimmed).catch();
-    fs.promises.rm(tempTrimmedLeft).catch();
-    fs.promises.rm(tempTrimmedRight).catch();
-    fs.promises.rm(tempTrimmedLeftNorm).catch();
-    fs.promises.rm(tempTrimmedRightNorm).catch();
+    await Promise.all(tempFiles.map((file) => fs.promises.rm(file).catch()));
   }
 };
 
@@ -305,39 +394,56 @@ const main = async () => {
   const baseFile = process.argv[2];
   const comparisonFile = process.argv[3];
   const sampleRate = 48000;
-  const chunkSize = 0.125;
-  const chunkInterval = 60;
+  const bitDepth = 24;
+  const channelCount = 2;
+  const threads = 16;
+  const chunkSize = 0.125; // how long the comparison file samples should be, shorter is better since it reduces the probability of miss-matching due to wow / flutter
+  const chunkInterval = 10; // how many seconds should elapse between samples of the comparison file
+  const syncStartRange = 60 * 3; // how many seconds to try to sync before the sample
+  const syncEndRange = 60 * 1; // how many seconds to try to sync after the sample
+  const maxRateTolerance = 0.5
 
   let synaudio = new SynAudio({
     correlationSampleSize: chunkSize * sampleRate,
     initialGranularity: 16,
-    shared: true
+    shared: true,
   });
 
   console.log("Decoding files...");
   let [baseFileDecoded, comparisonFileChunks] = await Promise.all([
     decodeAndSave(baseFile),
-    decodeAndSave(comparisonFile, chunkSize, chunkInterval),
+    decodeAndSave(
+      comparisonFile,
+      chunkSize,
+      chunkInterval,
+      syncStartRange,
+      syncEndRange,
+      sampleRate,
+    ),
   ]);
-  const baseFileDecodedLength = baseFileDecoded.length
+  const baseFileDecodedLength = baseFileDecoded.length;
 
   process.stdout.write("Synchronizing files...");
   const syncResults = synaudio.syncOneToMany(
-      {
-        channelData: [baseFileDecoded],
-        samplesDecoded: baseFileDecoded.length,
-      },
-      comparisonFileChunks.map((comparisonChunk) => ({
-        channelData: [comparisonChunk.data],
-        samplesDecoded: comparisonChunk.data.length,
-      })),
-      16,
-      (progress) =>
-        process.stdout.write(`\rSynchronizing files... ${Math.round(progress * 100)}%`),
-    )
+    {
+      channelData: [baseFileDecoded],
+      samplesDecoded: baseFileDecoded.length,
+    },
+    comparisonFileChunks.map((comparisonChunk) => ({
+      channelData: [comparisonChunk.data],
+      samplesDecoded: comparisonChunk.data.length,
+      syncStart: comparisonChunk.syncStart,
+      syncEnd: comparisonChunk.syncEnd,
+    })),
+    threads,
+    (progress) =>
+      process.stdout.write(
+        `\rSynchronizing files... ${Math.round(progress * 100)}%`,
+      ),
+  );
   // dereference these so they can be garbage collected as soon as possible
   baseFileDecoded = null;
-  comparisonFileChunks.forEach(chunk => chunk.data = null)
+  comparisonFileChunks.forEach((chunk) => (chunk.data = null));
 
   const results = (await syncResults).map((sr, i) => ({
     ...sr,
@@ -348,21 +454,25 @@ const main = async () => {
   }));
   process.stdout.write("\n");
 
-  synaudio = null; 
+  synaudio = null;
 
-  //*/
-  const { slope, intercept } = simpleLinearRegression(results);
+  const { slope, intercept } = simpleLinearRegression(results, maxRateTolerance);
   const startSeconds = intercept;
   const endSeconds = baseFileDecodedLength / 48000;
   const rate = 1 + slope / chunkInterval;
 
   console.log("Trim Start", startSeconds, "Trim End", endSeconds, "Rate", rate);
+
   await trimAndResample(
     comparisonFile,
     comparisonFile + ".level.flac",
     startSeconds,
     endSeconds,
     rate,
+    sampleRate,
+    bitDepth,
+    channelCount,
+    threads,
   );
 
   console.log("Done");
