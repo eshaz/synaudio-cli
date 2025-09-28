@@ -1,15 +1,22 @@
 {
-  "name": "synaudio_cli",
+  "name": "synaudio-cli",
   "version": "0.0.1",
   "description": "",
-  "license": "ISC",
-  "author": "",
+  "author": "Ethan Halsall",
+  "license": "GPL-3.0",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "format": "prettier --cache --write \"**/*.*{js,ts}*\"",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "format": "prettier --cache --write \"**/*.*{js,ts}*\""
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eshaz/synaudio-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eshaz/synaudio-cli/issues"
+  },
+  "homepage": "https://github.com/eshaz/synaudio-cli#readme",
   "dependencies": {
     "@wasm-audio-decoders/flac": "^0.2.8",
     "ogg-opus-decoder": "1.7.1",

@@ -2,23 +2,7 @@ import { FLACDecoderWebWorker } from "@wasm-audio-decoders/flac";
 import SynAudio from "synaudio";
 import fs from "fs";
 import { spawn } from "child_process";
-import { OggOpusDecoderWebWorker, OggOpusDecoder } from "ogg-opus-decoder";
-
-/*
-
-Decode the entire sync source file -> save to float32, sum all channels together
-
-Decode the chunks of other file, 10 seconds every minute or different?
-
-For each chunk, sync to the source file
-
-calculate shrink / stretch
-
-amplify each channel of input file
-sync to beginning
-shrink / stretch to end
-
-*/
+import { OggOpusDecoderWebWorker } from "ogg-opus-decoder";
 
 const saveDecodedData = (outputChunks) => (decoded) => {
   if (decoded.samplesDecoded > 0) {
@@ -217,7 +201,7 @@ function removeOutliers(data, tolerance = 0.5) {
   const outliers = data.filter(
     (item) => item.difference < lowerBound || item.difference > upperBound,
   );
-  return goodValues
+  return goodValues;
 }
 
 function weightedLinearRegression(data) {
@@ -390,6 +374,40 @@ const trimAndResample = async (
   }
 };
 
+/*
+ * Multiple comparison files against one base file
+ * Spawn main decode into promise
+ * Start loop decoding and syncing comparison files
+ * Spawn first comparison decode
+ * Wait for main decode and comparison decode
+ * Spawn new promise to sync and sox commands
+ * Wait for all sync and resamples to complete
+ * Decode input audio using sox
+ * Decode audio to a shared sample rate
+ * Add yargs
+ * General refactoring
+ * Add parameters
+ * Positional parameters
+ * First positional arguments, input base file
+ * All other positional arguments, input comparison file(s)
+ * Decode Options
+ * Sync shared sample rate, default 48000 (maybe should default to highest rate of all sources)
+ * Option to rectify input audio, so phase match has less of an influence for syncing. Good for syncing sources with wow and flutter
+ * Output Options
+ * File name renaming pattern for synced comparison files
+ * Delete comparison files when done
+ * Output encoding options, i.e. flac options
+ * Option to normalize
+ * Option to normalize as independent channels
+ * Sync options
+ * Sync thread count
+ * Sync chunk size
+ * Sync chunk interval
+ * Sync start range
+ * Sync end range
+ * Max sync rate tolerance (how much +- the rate might differ from source)
+ */
+
 const main = async () => {
   const baseFile = process.argv[2];
   const comparisonFile = process.argv[3];
@@ -401,7 +419,7 @@ const main = async () => {
   const chunkInterval = 10; // how many seconds should elapse between samples of the comparison file
   const syncStartRange = 60 * 3; // how many seconds to try to sync before the sample
   const syncEndRange = 60 * 1; // how many seconds to try to sync after the sample
-  const maxRateTolerance = 0.5
+  const maxRateTolerance = 0.5;
 
   let synaudio = new SynAudio({
     correlationSampleSize: chunkSize * sampleRate,
@@ -429,9 +447,12 @@ const main = async () => {
       channelData: [baseFileDecoded],
       samplesDecoded: baseFileDecoded.length,
     },
-    comparisonFileChunks.map((comparisonChunk) => ({
-      channelData: [comparisonChunk.data],
-      samplesDecoded: comparisonChunk.data.length,
+    comparisonFileChunks.map((comparisonChunk, i) => ({
+      name: i,
+      data: {
+        channelData: [comparisonChunk.data],
+        samplesDecoded: comparisonChunk.data.length,
+      },
       syncStart: comparisonChunk.syncStart,
       syncEnd: comparisonChunk.syncEnd,
     })),
@@ -456,7 +477,10 @@ const main = async () => {
 
   synaudio = null;
 
-  const { slope, intercept } = simpleLinearRegression(results, maxRateTolerance);
+  const { slope, intercept } = simpleLinearRegression(
+    results,
+    maxRateTolerance,
+  );
   const startSeconds = intercept;
   const endSeconds = baseFileDecodedLength / 48000;
   const rate = 1 + slope / chunkInterval;
