@@ -1,6 +1,9 @@
 import SynAudio from "synaudio";
 import fs from "fs";
 import { spawn } from "child_process";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+import os from "os";
 
 const copyToSharedMemoryChunked = (
   inputChunks,
@@ -358,60 +361,83 @@ const trimAndResample = async (
 
  */
 
-const getSampleRates = async (files) =>
+const getFileInfo = async (files) =>
   Promise.all(
     files.map(
       (file) =>
-        new Promise((resolve) => {
-          const { stdout } = runCmd("ffprobe", [
+        new Promise((resolve, reject) => {
+          const buffers = [];
+          const { promise, stdout } = runCmd("ffprobe", [
             "-v",
             "error",
             "-select_streams",
-            "a:0", // only supports using the first stream
+            "a",
             "-show_entries",
-            "stream=sample_rate",
+            "stream=channels,bits_per_raw_sample,sample_rate",
             "-of",
-            "csv=p=0",
+            "json",
             file,
           ]);
-          stdout.on("data", (sampleRate) => {
-            resolve(Number(sampleRate.toString("utf8")));
+
+          stdout.on("data", (data) => {
+            buffers.push(data);
+          });
+
+          promise.then(() => {
+            const fileInfo = JSON.parse(
+              Buffer.concat(buffers).toString("utf8"),
+            );
+            const firstStream = fileInfo?.streams?.[0]; // only supports using the first stream
+            if (!firstStream) {
+              reject(file + " does not have any audio streams");
+            } else {
+              resolve({
+                sampleRate: firstStream["sample_rate"],
+                channels: firstStream["channels"],
+                bitDepth: parseInt(firstStream["bits_per_raw_sample"]),
+              });
+            }
           });
         }),
     ),
-  ).then((sampleRates) => Math.max(...sampleRates));
+  );
 
-const main = async () => {
-  const baseFile = process.argv[2];
-  const comparisonFile = process.argv[3];
-  const bitDepth = 24;
-  const channelCount = 2;
-  const threads = 16;
-  const chunkSize = 0.125; // how long the comparison file samples should be, shorter is better since it reduces the probability of miss-matching due to wow / flutter
-  const chunkInterval = 10; // how many seconds should elapse between samples of the comparison file
-  const syncStartRange = 60 * 3; // how many seconds to try to sync before the sample
-  const syncEndRange = 60 * 1; // how many seconds to try to sync after the sample
-  const maxRateTolerance = 0.5;
-
+const syncResampleEncode = async ({
+  baseFile,
+  comparisonFile,
+  threads,
+  sampleLength,
+  sampleGap,
+  startRange,
+  endRange,
+  rateTolerance,
+  rectify,
+  deleteComparison,
+  normalize,
+  normalizeIndependent,
+  encodeOptions,
+  renameString,
+}) => {
   console.log("Decoding files...");
-  const sampleRate = await getSampleRates([baseFile, comparisonFile]);
-  console.log(`Using sample rate ${sampleRate}`);
+  const fileInfo = await getFileInfo([baseFile, comparisonFile]);
+  const comparisonFileInfo = fileInfo[1];
+  const commonSampleRate = Math.max(...fileInfo.map((info) => info.sampleRate));
 
   let synaudio = new SynAudio({
-    correlationSampleSize: chunkSize * sampleRate,
+    correlationSampleSize: sampleLength * commonSampleRate,
     initialGranularity: 16,
     shared: true,
   });
 
   let [baseFileDecoded, comparisonFileChunks] = await Promise.all([
-    decodeAndSave(baseFile, sampleRate),
+    decodeAndSave(baseFile, commonSampleRate),
     decodeAndSave(
       comparisonFile,
-      sampleRate,
-      chunkSize,
-      chunkInterval,
-      syncStartRange,
-      syncEndRange,
+      commonSampleRate,
+      sampleLength,
+      sampleGap,
+      startRange,
+      endRange,
     ),
   ]);
   const baseFileDecodedLength = baseFileDecoded.length;
@@ -444,7 +470,8 @@ const main = async () => {
   const results = (await syncResults).map((sr, i) => ({
     ...sr,
     order: i,
-    difference: (comparisonFileChunks[i].start - sr.sampleOffset) / sampleRate,
+    difference:
+      (comparisonFileChunks[i].start - sr.sampleOffset) / commonSampleRate,
     start: comparisonFileChunks[i].start,
     end: comparisonFileChunks[i].end,
   }));
@@ -452,13 +479,10 @@ const main = async () => {
 
   synaudio = null;
 
-  const { slope, intercept } = simpleLinearRegression(
-    results,
-    maxRateTolerance,
-  );
+  const { slope, intercept } = simpleLinearRegression(results, rateTolerance);
   const startSeconds = intercept;
   const endSeconds = baseFileDecodedLength / 48000;
-  const rate = 1 + slope / chunkInterval;
+  const rate = 1 + slope / sampleGap;
 
   console.log("Trim Start", startSeconds, "Trim End", endSeconds, "Rate", rate);
 
@@ -468,14 +492,134 @@ const main = async () => {
     startSeconds,
     endSeconds,
     rate,
-    sampleRate,
-    bitDepth,
-    channelCount,
+    comparisonFileInfo.sampleRate,
+    comparisonFileInfo.bitDepth || 24, // default to 24 in case ffprobe doesn't return a bitdepth
+    comparisonFileInfo.channels,
     threads,
   );
 
   console.log("Done");
   setTimeout(() => process.exit(0), 3000);
+};
+
+const main = () => {
+  const cpuCoreCount = os.cpus().length;
+
+  const argv = yargs(hideBin(process.argv))
+    .command(
+      "$0 <base-file> <comparison-file>",
+      "syncs the <comparison_file> to the <base_file>",
+      (yargs) => {
+        yargs
+          .positional("base-file", {
+            describe: "File used as the base of comparison.",
+            type: "string",
+          })
+          .positional("comparison-file", {
+            describe: "File that will be synced against the base file.",
+            type: "string",
+          });
+      },
+    )
+    .option("t", {
+      alias: "threads",
+      default: cpuCoreCount,
+      describe: "Number of threads to spawn while comparing audio.",
+      type: "number",
+      min: 1,
+      max: cpuCoreCount,
+    })
+    .option("R", {
+      alias: "rectify",
+      group: "Sync Options:",
+      default: true,
+      describe:
+        "Rectify the audio before comparing for better cross-correlation",
+      type: "boolean",
+    })
+    .options("T", {
+      alias: "rate-tolerance",
+      group: "Sync Options:",
+      default: 0.5,
+      describe:
+        "Duration in seconds describing how much +- the rate might differ from the base file.",
+      min: 0,
+      type: "number",
+    })
+    .options("L", {
+      alias: "sample-length",
+      group: "Sync Options:",
+      default: 0.125,
+      describe: "Duration in seconds of each comparison file sample.",
+      min: 0,
+      type: "number",
+    })
+    .options("G", {
+      alias: "sample-gap",
+      group: "Sync Options:",
+      default: 10,
+      describe:
+        "Duration in seconds to skip between samples of the comparison file.",
+      min: 0,
+      type: "number",
+    })
+    .options("S", {
+      alias: "start-range",
+      group: "Sync Options:",
+      default: 60 * 3,
+      describe: "Duration in seconds to try to sync before the sample.",
+      min: 0,
+      type: "number",
+    })
+    .options("E", {
+      alias: "end-range",
+      group: "Sync Options:",
+      default: 60 * 1,
+      describe: "Duration in seconds to try to sync after the sample.",
+      min: 0,
+      type: "number",
+    })
+    .option("d", {
+      alias: "delete-comparision",
+      group: "Output Options:",
+      default: false,
+      describe:
+        "Delete the original comparison file after successfully syncing.",
+      type: "boolean",
+    })
+    .option("n", {
+      alias: "normalize",
+      group: "Output Options:",
+      default: false,
+      describe: "Normalize the output audio.",
+      type: "boolean",
+    })
+    .option("m", {
+      alias: "normalize-independent",
+      group: "Output Options:",
+      default: false,
+      describe: "Normalize the output audio for each channel independently.",
+      type: "boolean",
+    })
+    .option("e", {
+      alias: "encode-options",
+      group: "Output Options:",
+      default: "-best",
+      describe: "Encode options supplied to `flac`",
+      type: "string",
+    })
+    .option("r", {
+      alias: "rename-string",
+      group: "Output Options:",
+      default: ".synced",
+      describe:
+        "String to insert in the synced file before the extension. i.e. comparison.flac -> comparison.synced.flac",
+      type: "string",
+    })
+    .wrap(yargs.terminalWidth)
+    .parse();
+
+  syncResampleEncode(argv);
 };
 
 main();

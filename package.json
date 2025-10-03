@@ -18,7 +18,8 @@
   },
   "homepage": "https://github.com/eshaz/synaudio-cli#readme",
   "dependencies": {
-    "synaudio": "0.4.0"
+    "synaudio": "0.4.0",
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
     "prettier": "^3.6.2"
