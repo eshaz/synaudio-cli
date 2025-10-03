@@ -1,28 +1,6 @@
-import { FLACDecoderWebWorker } from "@wasm-audio-decoders/flac";
 import SynAudio from "synaudio";
 import fs from "fs";
 import { spawn } from "child_process";
-import { OggOpusDecoderWebWorker } from "ogg-opus-decoder";
-
-const saveDecodedData = (outputChunks) => (decoded) => {
-  if (decoded.samplesDecoded > 0) {
-    for (let i = 1; i < decoded.channelData.length; i++) {
-      for (let j = 0; j < decoded.samplesDecoded; j++) {
-        // sum to mono
-        decoded.channelData[0][j] += decoded.channelData[i][j];
-      }
-    }
-    for (let i = 0; i < decoded.channelData[0].length; i++) {
-      // positive phase only
-      decoded.channelData[0][i] =
-        decoded.channelData[0][i] < 0
-          ? -decoded.channelData[0][i]
-          : decoded.channelData[0][i];
-    }
-    outputChunks.push(decoded.channelData[0]);
-  }
-  return decoded.samplesDecoded;
-};
 
 const copyToSharedMemoryChunked = (
   inputChunks,
@@ -107,66 +85,59 @@ const copyToSharedMemory = (inputChunks, inputLength) => {
   return sharedMemory;
 };
 
-const decodeAndSave = (
+const decodeAndSave = async (
   inputFile,
+  sampleRate,
   chunkSize = 0,
   chunkInterval = 0,
   syncStartRange,
   syncEndRange,
-  sampleRate,
 ) => {
-  return new Promise(async (resolve, reject) => {
-    const outputChunks = [];
-    let outputSamples = 0;
-    let decoder;
+  const { promise, stdout } = runCmd("ffmpeg", [
+    "-v",
+    "error",
+    "-i",
+    inputFile,
+    "-map",
+    "0:a:0", // only support one audio file
+    "-ac",
+    "1",
+    "-ar",
+    sampleRate,
+    "-f",
+    "f32le",
+    "-acodec",
+    "pcm_f32le",
+    "-",
+  ]);
 
-    if (inputFile.endsWith(".ogg")) {
-      decoder = new OggOpusDecoderWebWorker();
-    } else {
-      decoder = new FLACDecoderWebWorker();
+  const outputChunks = [];
+  let outputSamples = 0;
+
+  stdout.on("data", (data) => {
+    const decoded = new Float32Array(data.buffer);
+
+    // rectify to avoid comparison issues with phase
+    for (let i = 0; i < decoded.length; i++) {
+      decoded[i] = decoded[i] < 0 ? -decoded[i] : decoded[i];
     }
-
-    await decoder.ready;
-    const readStream = fs.createReadStream(inputFile);
-
-    readStream.on("data", (chunk) => {
-      decoder
-        .decode(chunk)
-        .then((decoded) => {
-          return decoded;
-        })
-        .then(saveDecodedData(outputChunks))
-        .then((samplesDecoded) => (outputSamples += samplesDecoded));
-    });
-
-    readStream.on("end", async () => {
-      decoder
-        .flush()
-        .then(saveDecodedData(outputChunks))
-        .then((samplesDecoded) => (outputSamples += samplesDecoded))
-        .then(() => {
-          decoder.free();
-
-          resolve(
-            chunkSize === 0
-              ? copyToSharedMemory(outputChunks, outputSamples)
-              : copyToSharedMemoryChunked(
-                  outputChunks,
-                  outputSamples,
-                  chunkSize,
-                  chunkInterval,
-                  syncStartRange,
-                  syncEndRange,
-                  sampleRate,
-                ),
-          );
-        });
-    });
-
-    readStream.on("error", (err) => {
-      reject(err);
-    });
+    outputChunks.push(decoded);
+    outputSamples += decoded.length;
   });
+
+  await promise;
+
+  return chunkSize === 0
+    ? copyToSharedMemory(outputChunks, outputSamples)
+    : copyToSharedMemoryChunked(
+        outputChunks,
+        outputSamples,
+        chunkSize,
+        chunkInterval,
+        syncStartRange,
+        syncEndRange,
+        sampleRate,
+      );
 };
 
 function removeOutliers(data, tolerance = 0.5) {
@@ -375,43 +346,44 @@ const trimAndResample = async (
 };
 
 /*
- * Multiple comparison files against one base file
- * Spawn main decode into promise
- * Start loop decoding and syncing comparison files
- * Spawn first comparison decode
- * Wait for main decode and comparison decode
- * Spawn new promise to sync and sox commands
- * Wait for all sync and resamples to complete
- * Decode input audio using sox
- * Decode audio to a shared sample rate
- * Add yargs
- * General refactoring
- * Add parameters
- * Positional parameters
- * First positional arguments, input base file
- * All other positional arguments, input comparison file(s)
- * Decode Options
- * Sync shared sample rate, default 48000 (maybe should default to highest rate of all sources)
- * Option to rectify input audio, so phase match has less of an influence for syncing. Good for syncing sources with wow and flutter
- * Output Options
- * File name renaming pattern for synced comparison files
- * Delete comparison files when done
- * Output encoding options, i.e. flac options
- * Option to normalize
- * Option to normalize as independent channels
- * Sync options
- * Sync thread count
- * Sync chunk size
- * Sync chunk interval
- * Sync start range
- * Sync end range
- * Max sync rate tolerance (how much +- the rate might differ from source)
+
+
+
+* Add README
+* Allow for `npm i -g synaudio-cli`
+* Release to NPM
+
+* General refactoring
+
+
  */
+
+const getSampleRates = async (files) =>
+  Promise.all(
+    files.map(
+      (file) =>
+        new Promise((resolve) => {
+          const { stdout } = runCmd("ffprobe", [
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0", // only supports using the first stream
+            "-show_entries",
+            "stream=sample_rate",
+            "-of",
+            "csv=p=0",
+            file,
+          ]);
+          stdout.on("data", (sampleRate) => {
+            resolve(Number(sampleRate.toString("utf8")));
+          });
+        }),
+    ),
+  ).then((sampleRates) => Math.max(...sampleRates));
 
 const main = async () => {
   const baseFile = process.argv[2];
   const comparisonFile = process.argv[3];
-  const sampleRate = 48000;
   const bitDepth = 24;
   const channelCount = 2;
   const threads = 16;
@@ -421,22 +393,25 @@ const main = async () => {
   const syncEndRange = 60 * 1; // how many seconds to try to sync after the sample
   const maxRateTolerance = 0.5;
 
+  console.log("Decoding files...");
+  const sampleRate = await getSampleRates([baseFile, comparisonFile]);
+  console.log(`Using sample rate ${sampleRate}`);
+
   let synaudio = new SynAudio({
     correlationSampleSize: chunkSize * sampleRate,
     initialGranularity: 16,
     shared: true,
   });
 
-  console.log("Decoding files...");
   let [baseFileDecoded, comparisonFileChunks] = await Promise.all([
-    decodeAndSave(baseFile),
+    decodeAndSave(baseFile, sampleRate),
     decodeAndSave(
       comparisonFile,
+      sampleRate,
       chunkSize,
       chunkInterval,
       syncStartRange,
       syncEndRange,
-      sampleRate,
     ),
   ]);
   const baseFileDecodedLength = baseFileDecoded.length;

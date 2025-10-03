@@ -18,9 +18,7 @@
   },
   "homepage": "https://github.com/eshaz/synaudio-cli#readme",
   "dependencies": {
-    "@wasm-audio-decoders/flac": "^0.2.8",
-    "ogg-opus-decoder": "1.7.1",
-    "synaudio": "file:../synaudio"
+    "synaudio": "0.4.0"
   },
   "devDependencies": {
     "prettier": "^3.6.2"
