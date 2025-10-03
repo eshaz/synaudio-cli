@@ -91,6 +91,7 @@ const copyToSharedMemory = (inputChunks, inputLength) => {
 const decodeAndSave = async (
   inputFile,
   sampleRate,
+  rectify,
   chunkSize = 0,
   chunkInterval = 0,
   syncStartRange,
@@ -121,8 +122,10 @@ const decodeAndSave = async (
     const decoded = new Float32Array(data.buffer);
 
     // rectify to avoid comparison issues with phase
-    for (let i = 0; i < decoded.length; i++) {
-      decoded[i] = decoded[i] < 0 ? -decoded[i] : decoded[i];
+    if (rectify) {
+      for (let i = 0; i < decoded.length; i++) {
+        decoded[i] = decoded[i] < 0 ? -decoded[i] : decoded[i];
+      }
     }
     outputChunks.push(decoded);
     outputSamples += decoded.length;
@@ -255,7 +258,10 @@ const trimAndResample = async (
   rate,
   sampleRate,
   bitDepth,
-  channelCount,
+  channels,
+  normalize,
+  normalizeIndependent,
+  encodeOptions,
   flacThreads,
 ) => {
   const tempFiles = [];
@@ -275,48 +281,64 @@ const trimAndResample = async (
       startSeconds,
       "speed",
       rate,
+      "trim",
+      "0",
+      endSeconds,
     ]).promise;
 
-    // amplify each channel
-    console.log("Normalizing...");
+    // optionally normalize
     const normalizePromises = [];
     const normalizeOutputFiles = [];
-    for (let i = 1; i <= channelCount; i++) {
-      const channelFile = `${outputFile}.tmp.${i}.flac`;
-      const normalizedFile = `${outputFile}.tmp.norm.${i}.flac`;
 
-      tempFiles.push(channelFile);
+    if (normalizeIndependent) {
+      console.log("Normalizing each channel...");
+      for (let i = 1; i <= channels; i++) {
+        const channelFile = `${outputFile}.tmp.${i}.flac`;
+        const normalizedFile = `${outputFile}.tmp.norm.${i}.flac`;
+
+        tempFiles.push(channelFile);
+        tempFiles.push(normalizedFile);
+        normalizeOutputFiles.push(normalizedFile);
+        normalizePromises.push(
+          runCmd("sox", [
+            tempTrimmed,
+            "-c",
+            "1",
+            channelFile,
+            "remix",
+            i,
+          ]).promise.then(
+            () =>
+              runCmd("sox", [channelFile, normalizedFile, "--norm"]).promise,
+          ),
+        );
+      }
+      await Promise.all(normalizePromises);
+    } else if (normalize) {
+      console.log("Normalizing...");
+
+      const normalizedFile = `${outputFile}.tmp.norm.flac`;
+
       tempFiles.push(normalizedFile);
       normalizeOutputFiles.push(normalizedFile);
       normalizePromises.push(
-        runCmd("sox", [
-          tempTrimmed,
-          "-c",
-          "1",
-          channelFile,
-          "trim",
-          "0",
-          endSeconds,
-          "remix",
-          i,
-        ]).promise.then(
-          () => runCmd("sox", [channelFile, normalizedFile, "--norm"]).promise,
-        ),
+        runCmd("sox", [tempTrimmed, normalizedFile, "--norm"]).promise,
       );
+      await Promise.all(normalizePromises);
+    } else {
+      normalizeOutputFiles.push(tempTrimmed);
     }
-    await Promise.all(normalizePromises);
 
     console.log("Writing output file...");
-    const { promise: soxPromise, stdout: soxStdout } = runCmd("sox", [
-      "--combine",
-      "merge",
+    const { stdout: soxStdout } = runCmd("sox", [
+      ...(normalizeIndependent ? ["--combine", "merge"] : []),
       ...normalizeOutputFiles,
       "-t",
       "raw",
       "-r",
       sampleRate,
       "-c",
-      channelCount,
+      channels,
       "-e",
       "signed",
       "-b",
@@ -327,11 +349,9 @@ const trimAndResample = async (
       "--endian=little",
       "--sign=signed",
       "--bps=" + bitDepth,
-      "--channels=" + channelCount,
+      "--channels=" + channels,
       "--sample-rate=" + sampleRate,
-      "-8",
-      "-p",
-      "-e",
+      encodeOptions,
       "-j",
       flacThreads,
       "-",
@@ -430,10 +450,11 @@ const syncResampleEncode = async ({
   });
 
   let [baseFileDecoded, comparisonFileChunks] = await Promise.all([
-    decodeAndSave(baseFile, commonSampleRate),
+    decodeAndSave(baseFile, commonSampleRate, rectify),
     decodeAndSave(
       comparisonFile,
       commonSampleRate,
+      rectify,
       sampleLength,
       sampleGap,
       startRange,
@@ -484,19 +505,28 @@ const syncResampleEncode = async ({
   const endSeconds = baseFileDecodedLength / 48000;
   const rate = 1 + slope / sampleGap;
 
-  console.log("Trim Start", startSeconds, "Trim End", endSeconds, "Rate", rate);
+  console.log("Trim start", startSeconds, "Trim end", endSeconds, "Rate", rate);
 
+  const outputFile = comparisonFile.replace(/(\.[^\.]+)$/, `${renameString}$1`);
   await trimAndResample(
     comparisonFile,
-    comparisonFile + ".level.flac",
+    outputFile,
     startSeconds,
     endSeconds,
     rate,
     comparisonFileInfo.sampleRate,
     comparisonFileInfo.bitDepth || 24, // default to 24 in case ffprobe doesn't return a bitdepth
     comparisonFileInfo.channels,
+    normalize,
+    normalizeIndependent,
+    encodeOptions,
     threads,
   );
+
+  if (deleteComparison) {
+    console.log("Deleting comparison file...");
+    await fs.promises.rm(comparisonFile);
+  }
 
   console.log("Done");
   setTimeout(() => process.exit(0), 3000);
@@ -580,7 +610,7 @@ const main = () => {
       type: "number",
     })
     .option("d", {
-      alias: "delete-comparision",
+      alias: "delete-comparison",
       group: "Output Options:",
       default: false,
       describe:
@@ -598,13 +628,13 @@ const main = () => {
       alias: "normalize-independent",
       group: "Output Options:",
       default: false,
-      describe: "Normalize the output audio for each channel independently.",
+      describe: "Normalize the output audio independently for each channel.",
       type: "boolean",
     })
     .option("e", {
       alias: "encode-options",
       group: "Output Options:",
-      default: "-best",
+      default: "--best",
       describe: "Encode options supplied to `flac`",
       type: "string",
     })
