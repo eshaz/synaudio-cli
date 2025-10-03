@@ -102,6 +102,8 @@ const decodeAndSave = async (
     "0:a:0", // only support one audio file
     "-ac",
     "1",
+    "-ar",
+    sampleRate,
     "-f",
     "f32le",
     "-acodec",
