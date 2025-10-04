@@ -1,13 +1,33 @@
 {
   "name": "synaudio-cli",
   "version": "0.0.1",
-  "description": "",
-  "author": "Ethan Halsall",
+  "description": "A command line tool for aligning and synchronizing two or more audio clips based on their content.",
+  "author": {
+    "name": "Ethan Halsall",
+    "email": "ethanhalsall@pm.me"
+  },
+  "keywords": [
+    "wasm",
+    "simd",
+    "audio",
+    "video",
+    "resampling",
+    "analog audio",
+    "audio processing",
+    "synchronization"
+  ],
   "license": "GPL-3.0",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "synaudio-cli": "index.js"
+  },
   "scripts": {
     "format": "prettier --cache --write \"**/*.*{js,ts}*\""
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/eshaz"
   },
   "repository": {
     "type": "git",
