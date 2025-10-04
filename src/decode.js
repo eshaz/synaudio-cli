@@ -1,6 +1,6 @@
 import { runCmd } from "./utilities.js";
 
-const copyToSharedMemoryChunked = (
+const copyToChunks = (
   inputChunks,
   inputLength,
   outputChunkSeconds,
@@ -9,16 +9,16 @@ const copyToSharedMemoryChunked = (
   syncEndRange,
   sampleRate,
 ) => {
-  const sharedMemories = [];
+  const chunks = [];
   const samplesPerChunk = sampleRate * outputChunkSeconds;
   const samplesToSkip = sampleRate * outputChunkIntervalSeconds;
 
-  let sharedMemory = null;
+  let data = null;
 
   let currentPosition = 0; // total bytes read
   let nextStart = 0;
   let nextEnd = 0;
-  let sharedMemoryPosition = 0;
+  let dataPosition = 0;
 
   for (const chunk of inputChunks) {
     if (currentPosition >= nextEnd) {
@@ -30,24 +30,21 @@ const copyToSharedMemoryChunked = (
         // next output chunk would start be beyond the input data
         break;
       }
-      const sharedMemoryBuffer = new SharedArrayBuffer(
-        (nextEnd - nextStart) * Float32Array.BYTES_PER_ELEMENT,
-      );
-      sharedMemory = new Float32Array(sharedMemoryBuffer);
-      sharedMemories.push({
+      data = new Float32Array(nextEnd - nextStart);
+      chunks.push({
         start: nextStart,
         end: nextEnd,
         syncStart:
           Math.round(
-            sharedMemories.length * outputChunkIntervalSeconds - syncStartRange,
+            chunks.length * outputChunkIntervalSeconds - syncStartRange,
           ) * sampleRate,
         syncEnd:
           Math.round(
-            sharedMemories.length * outputChunkIntervalSeconds + syncEndRange,
+            chunks.length * outputChunkIntervalSeconds + syncEndRange,
           ) * sampleRate,
-        data: sharedMemory,
+        data,
       });
-      sharedMemoryPosition = 0;
+      dataPosition = 0;
     }
 
     const chunkStart = nextStart - currentPosition;
@@ -58,29 +55,26 @@ const copyToSharedMemoryChunked = (
       const startOffset = Math.max(0, chunkStart);
       const endOffset = Math.min(chunkLength, chunkEnd);
       const chunkToCopy = chunk.subarray(startOffset, endOffset);
-      sharedMemory.set(chunkToCopy, sharedMemoryPosition);
-      sharedMemoryPosition += chunkToCopy.length;
+      data.set(chunkToCopy, dataPosition);
+      dataPosition += chunkToCopy.length;
     }
 
     currentPosition += chunk.length;
   }
 
-  return sharedMemories;
+  return chunks;
 };
 
-const copyToSharedMemory = (inputChunks, inputLength) => {
+const concatenate = (inputChunks, inputLength) => {
   let currentPosition = 0;
-  const sharedMemoryBuffer = new SharedArrayBuffer(
-    inputLength * Float32Array.BYTES_PER_ELEMENT,
-  );
-  const sharedMemory = new Float32Array(sharedMemoryBuffer);
+  const data = new Float32Array(inputLength);
 
   for (const chunk of inputChunks) {
-    sharedMemory.set(chunk, currentPosition);
+    data.set(chunk, currentPosition);
     currentPosition += chunk.length;
   }
 
-  return sharedMemory;
+  return data;
 };
 
 export const decodeAndSave = async (
@@ -129,8 +123,8 @@ export const decodeAndSave = async (
   await promise;
 
   return chunkSize === 0
-    ? copyToSharedMemory(outputChunks, outputSamples)
-    : copyToSharedMemoryChunked(
+    ? concatenate(outputChunks, outputSamples)
+    : copyToChunks(
         outputChunks,
         outputSamples,
         chunkSize,
