@@ -1,4 +1,7 @@
 import { spawn } from "child_process";
+import os from "os";
+import crypto from "crypto";
+import path from "path";
 
 export const runCmd = (cmd, args) => {
   const spawned = spawn(cmd, args);
@@ -58,3 +61,5 @@ export const getFileInfo = async (files) =>
         }),
     ),
   );
+
+export const getTempFile = () => path.join(os.tmpdir(), crypto.randomUUID());

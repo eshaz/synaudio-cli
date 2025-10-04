@@ -2,7 +2,7 @@ import SynAudio from "synaudio";
 import fs from "fs";
 import { decodeAndSave } from "./decode.js";
 import { simpleLinearRegression } from "./linear-regression.js";
-import { getFileInfo, runCmd } from "./utilities.js";
+import { getFileInfo, getTempFile, runCmd } from "./utilities.js";
 
 const trimAndResample = async (
   inputFile,
@@ -18,13 +18,14 @@ const trimAndResample = async (
   encodeOptions,
   flacThreads,
 ) => {
+  const tempFileName = getTempFile();
   const tempFiles = [];
 
   try {
     // resample
     console.log("Adjusting offset and speed...");
 
-    const tempTrimmed = outputFile + ".tmp.flac";
+    const tempTrimmed = tempFileName + ".tmp.flac";
     tempFiles.push(tempTrimmed);
     await runCmd("sox", [
       inputFile,
@@ -46,8 +47,8 @@ const trimAndResample = async (
     if (normalizeIndependent) {
       console.log("Normalizing each channel...");
       for (let i = 1; i <= channels; i++) {
-        const channelFile = `${outputFile}.tmp.${i}.flac`;
-        const normalizedFile = `${outputFile}.tmp.norm.${i}.flac`;
+        const channelFile = `${tempFileName}.tmp.${i}.flac`;
+        const normalizedFile = `${tempFileName}.tmp.norm.${i}.flac`;
 
         tempFiles.push(channelFile);
         tempFiles.push(normalizedFile);
@@ -70,7 +71,7 @@ const trimAndResample = async (
     } else if (normalize) {
       console.log("Normalizing...");
 
-      const normalizedFile = `${outputFile}.tmp.norm.flac`;
+      const normalizedFile = `${tempFileName}.tmp.norm.flac`;
 
       tempFiles.push(normalizedFile);
       normalizeOutputFiles.push(normalizedFile);
@@ -82,7 +83,7 @@ const trimAndResample = async (
       normalizeOutputFiles.push(tempTrimmed);
     }
 
-    console.log("Writing output file...");
+    console.log("Writing output file...", outputFile);
     const { stdout: soxStdout } = runCmd("sox", [
       ...(normalizeIndependent ? ["--combine", "merge"] : []),
       ...normalizeOutputFiles,
