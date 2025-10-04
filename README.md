@@ -2,9 +2,12 @@
 
 A command line tool for aligning and synchronizing two or more audio clips based on their content.
 
+_Based on [synaudio](https://eshaz.github.io/synaudio)_
+
 ## How it works
 
-* Based on [synaudio](https://eshaz.github.io/synaudio)
+`synaudio-cli` accepts two files, one `base` file and one `comparison` and writes out a copy of the `comparison` file that is aligned to the start and the speed of the `base` file.
+
 * The first file supplied is the `base`. It is used as the basis of comparison.
 * The second file supplied is the `comparison`. A copy of this file that is synchronized against the `base` will be saved to disk.
   * These two files supplied should have audio that is similar, but the audio does not need to be an exact match.
@@ -23,7 +26,7 @@ A command line tool for aligning and synchronizing two or more audio clips based
   * The `comparison` file is rate adjusted based on the linear regression slope
   * (Optional) The `comparison` file is normalized, either as a whole, or as independent channels.
 
-### Audio Example
+### Example
 The below visual example is a screenshot from an audio editor of the `base`, `comparison`, and final output `synced` files. This example was generated from two recordings from analog tape, one mono low fidelity recording (`base`) and another stereo high fidelity recording (`comparison`). The image is cut in the middle so the beginning and end of the audio are both visible.
 
 ```sh
@@ -31,7 +34,7 @@ $ synaudio-cli --normalize-independent base.ogg comparison.flac
 Decoding files...
 Synchronizing files... 100%
 Trim start 15.36761384342938 Trim end 3530.78 Rate 0.9999550657881119
-Adjusting speed...
+Adjusting offset and speed...
 Normalizing each channel...
 Writing output file...
 Done
@@ -42,10 +45,8 @@ Done
 
 ### Pre-requisites
 * [Node.js](https://nodejs.org/en/download) JavaScript runtime
-* [`ffmpeg`](https://ffmpeg.org/) audio processing tool
-  * Ensure the `ffmpeg` and `ffprobe` executables are available in your `PATH` environment variable
-* [`sox`](https://sourceforge.net/projects/sox/) audio processing tool
-  * Ensure the `sox` executable is available in your `PATH` environment variable
+* [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/) and [`ffmpeg`](https://ffmpeg.org/download.html) audio processing tools
+  * Ensure the `sox`, `ffmpeg`, `ffprobe` executables are available in your `PATH` environment variable
 
 ### Installing `synaudio-cli`
 * From a terminal, run `npm i -g synaudio-cli`
@@ -53,11 +54,11 @@ Done
 ## Usage
 
 ### `$ synaudio-cli base.ogg comparison.flac`
-* Synchornizes `comparison.flac` to align with `base.ogg`
+* Synchronizes `comparison.flac` to align with `base.ogg`
 
 
 ### `$ synaudio-cli --normalize-independent base.ogg comparison.flac`
-* Synchornizes `comparison.flac` to align with `base.ogg`, and normalizes each channel of the output file independently
+* Synchronizes `comparison.flac` to align with `base.ogg`, and normalizes each channel of the output file independently
 
 ## Options
 
