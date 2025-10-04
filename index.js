@@ -3,6 +3,7 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import os from "os";
+import { syncResampleEncode } from "./src/synaudio-cli.js";
 
 const cpuCoreCount = os.cpus().length;
 
