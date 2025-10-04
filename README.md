@@ -36,7 +36,7 @@ Synchronizing files... 100%
 Trim start 15.36761384342938 Trim end 3530.78 Rate 0.9999550657881119
 Adjusting offset and speed...
 Normalizing each channel...
-Writing output file...
+Encoding output file... comparison.synced.flac
 Done
 ```
 ![Sync Example](docs/sync_example.png)
@@ -45,8 +45,8 @@ Done
 
 ### Pre-requisites
 * [Node.js](https://nodejs.org/en/download) JavaScript runtime
-* [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/) and [`ffmpeg`](https://ffmpeg.org/download.html) audio processing tools
-  * Ensure the `sox`, `ffmpeg`, `ffprobe` executables are available in your `PATH` environment variable
+* [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/), [`ffmpeg`](https://ffmpeg.org/download.html), [`flac`](https://xiph.org/flac/download.html) audio processing tools
+  * Ensure the `sox`, `ffmpeg`, `ffprobe` (part of ffmpeg), and `flac` executables are available in your `PATH` environment variable
 
 ### Installing `synaudio-cli`
 * From a terminal, run `npm i -g synaudio-cli`

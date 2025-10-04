@@ -83,7 +83,7 @@ const trimAndResample = async (
       normalizeOutputFiles.push(tempTrimmed);
     }
 
-    console.log("Writing output file...", outputFile);
+    console.log("Encoding output file...", outputFile);
     const { stdout: soxStdout } = runCmd("sox", [
       ...(normalizeIndependent ? ["--combine", "merge"] : []),
       ...normalizeOutputFiles,
@@ -226,7 +226,9 @@ export const syncResampleEncode = async ({
 
   if (deleteComparison) {
     console.log("Deleting comparison file...");
-    await fs.promises.rm(comparisonFile);
+    await fs.promises.rm(comparisonFile).catch((e) => {
+      console.error("failed to delete the comparison file", e);
+    });
   }
 
   console.log("Done");
