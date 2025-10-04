@@ -36,7 +36,7 @@ Normalizing each channel...
 Writing output file...
 Done
 ```
-![Sync Example](doc/sync_example.png)
+![Sync Example](docs/sync_example.png)
 
 ## Installation
 
