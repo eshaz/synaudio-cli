@@ -88,7 +88,8 @@ Positionals:
   comparison-file  File that will be synced against the base file.  [string]
 
 Options:
-      --help     Show help  [boolean]
-      --version  Show version number  [boolean]
-  -t, --threads  Number of threads to spawn while comparing audio.  [number] [default: 16]
+      --help          Show help  [boolean]
+      --version       Show version number  [boolean]
+  -t, --threads       Number of threads to spawn while comparing audio.  [number] [default: 16]
+      --flac-threads  Number of threads to spawn while encoding using `flac`. Set to 1 to disable threading.  [number] [default: 16]
 ```

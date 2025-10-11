@@ -107,8 +107,7 @@ const trimAndResample = async (
       "--channels=" + channels,
       "--sample-rate=" + sampleRate,
       encodeOptions,
-      "-j",
-      flacThreads,
+      ...(flacThreads > 1 ? ["-j", flacThreads] : []),
       "-",
       "-f",
       "-o",
@@ -127,6 +126,7 @@ export const syncResampleEncode = async ({
   baseFile,
   comparisonFile,
   threads,
+  flacThreads,
   sampleLength,
   sampleGap,
   startRange,
@@ -221,7 +221,7 @@ export const syncResampleEncode = async ({
     normalize,
     normalizeIndependent,
     encodeOptions,
-    threads,
+    flacThreads,
   );
 
   if (deleteComparison) {

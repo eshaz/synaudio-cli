@@ -31,6 +31,13 @@ const argv = yargs(hideBin(process.argv))
     min: 1,
     max: cpuCoreCount,
   })
+  .option("flac-threads", {
+    default: Math.min(cpuCoreCount, 16),
+    describe: "Number of threads to spawn while encoding using `flac`. Set to 1 to disable threading.",
+    type: "number",
+    min: 1,
+    max: 16,
+  })
   .option("R", {
     alias: "rectify",
     group: "Sync Options:",

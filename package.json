@@ -1,6 +1,6 @@
 {
   "name": "synaudio-cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A command line tool for aligning and synchronizing two or more audio clips based on their content.",
   "author": {
     "name": "Ethan Halsall",
