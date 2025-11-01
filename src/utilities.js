@@ -63,3 +63,6 @@ export const getFileInfo = async (files) =>
   );
 
 export const getTempFile = () => path.join(os.tmpdir(), crypto.randomUUID());
+
+export const roundToSampleRate = (seconds, rate) =>
+  Math.round(rate * seconds) / rate;

@@ -2,7 +2,12 @@ import SynAudio from "synaudio";
 import fs from "fs";
 import { decodeAndSave } from "./decode.js";
 import { simpleLinearRegression } from "./linear-regression.js";
-import { getFileInfo, getTempFile, runCmd } from "./utilities.js";
+import {
+  getFileInfo,
+  getTempFile,
+  runCmd,
+  roundToSampleRate,
+} from "./utilities.js";
 
 const trimAndResample = async (
   inputFile,
@@ -106,6 +111,7 @@ const trimAndResample = async (
       "--bps=" + bitDepth,
       "--channels=" + channels,
       "--sample-rate=" + sampleRate,
+      "--lax",
       encodeOptions,
       ...(flacThreads > 1 ? ["-j", flacThreads] : []),
       "-",
@@ -143,6 +149,11 @@ export const syncResampleEncode = async ({
   const fileInfo = await getFileInfo([baseFile, comparisonFile]);
   const comparisonFileInfo = fileInfo[1];
   const commonSampleRate = Math.max(...fileInfo.map((info) => info.sampleRate));
+
+  sampleLength = roundToSampleRate(sampleLength, commonSampleRate);
+  sampleGap = roundToSampleRate(sampleGap, commonSampleRate);
+  startRange = roundToSampleRate(startRange, commonSampleRate);
+  endRange = roundToSampleRate(endRange, commonSampleRate);
 
   let synaudio = new SynAudio({
     correlationSampleSize: sampleLength * commonSampleRate,

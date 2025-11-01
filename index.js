@@ -6,6 +6,9 @@ import os from "os";
 import { syncResampleEncode } from "./src/synaudio-cli.js";
 
 const cpuCoreCount = os.cpus().length;
+const syncOptionsGroup =
+  "Sync Options: (seconds are rounded to fit the sample rate)";
+const outputOptionsGroup = "Output Options:";
 
 const argv = yargs(hideBin(process.argv))
   .command(
@@ -23,6 +26,7 @@ const argv = yargs(hideBin(process.argv))
         });
     },
   )
+  .completion()
   .option("t", {
     alias: "threads",
     default: cpuCoreCount,
@@ -33,21 +37,22 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("flac-threads", {
     default: Math.min(cpuCoreCount, 16),
-    describe: "Number of threads to spawn while encoding using `flac`. Set to 1 to disable threading.",
+    describe:
+      "Number of threads to spawn while encoding using `flac`. Set to 1 to disable threading.",
     type: "number",
     min: 1,
     max: 16,
   })
   .option("R", {
     alias: "rectify",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: true,
     describe: "Rectify the audio before comparing for better cross-correlation",
     type: "boolean",
   })
   .options("T", {
     alias: "rate-tolerance",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: 0.5,
     describe:
       "Duration in seconds describing how much +- the rate might differ from the base file.",
@@ -56,7 +61,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .options("L", {
     alias: "sample-length",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: 0.125,
     describe: "Duration in seconds of each comparison file sample.",
     min: 0,
@@ -64,7 +69,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .options("G", {
     alias: "sample-gap",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: 10,
     describe:
       "Duration in seconds to skip between samples of the comparison file.",
@@ -73,7 +78,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .options("S", {
     alias: "start-range",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: 60 * 3,
     describe: "Duration in seconds to try to sync before the sample.",
     min: 0,
@@ -81,7 +86,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .options("E", {
     alias: "end-range",
-    group: "Sync Options:",
+    group: syncOptionsGroup,
     default: 60 * 1,
     describe: "Duration in seconds to try to sync after the sample.",
     min: 0,
@@ -89,35 +94,35 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("d", {
     alias: "delete-comparison",
-    group: "Output Options:",
+    group: outputOptionsGroup,
     default: false,
     describe: "Delete the original comparison file after successfully syncing.",
     type: "boolean",
   })
   .option("n", {
     alias: "normalize",
-    group: "Output Options:",
+    group: outputOptionsGroup,
     default: false,
     describe: "Normalize the output audio.",
     type: "boolean",
   })
   .option("m", {
     alias: "normalize-independent",
-    group: "Output Options:",
+    group: outputOptionsGroup,
     default: false,
     describe: "Normalize the output audio independently for each channel.",
     type: "boolean",
   })
   .option("e", {
     alias: "encode-options",
-    group: "Output Options:",
+    group: outputOptionsGroup,
     default: "--best",
     describe: "Encode options supplied to `flac`",
     type: "string",
   })
   .option("r", {
     alias: "rename-string",
-    group: "Output Options:",
+    group: outputOptionsGroup,
     default: ".synced",
     describe:
       "String to insert in the synced file before the extension. i.e. comparison.flac -> comparison.synced.flac",
