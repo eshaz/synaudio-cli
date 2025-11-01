@@ -43,6 +43,8 @@ Done
 
 ## Installation
 
+### [NPM](https://www.npmjs.com/package/synaudio-cli)
+
 ### Pre-requisites
 * [Node.js](https://nodejs.org/en/download) JavaScript runtime
 * [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/), [`ffmpeg`](https://ffmpeg.org/download.html), [`flac`](https://xiph.org/flac/download.html) audio processing tools
