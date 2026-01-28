@@ -47,8 +47,8 @@ Done
 
 ### Pre-requisites
 * [Node.js](https://nodejs.org/en/download) JavaScript runtime
-* [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/), [`ffmpeg`](https://ffmpeg.org/download.html), [`flac`](https://xiph.org/flac/download.html) audio processing tools
-  * Ensure the `sox`, `ffmpeg`, `ffprobe` (part of ffmpeg), and `flac` executables are available in your `PATH` environment variable
+* [`sox`](https://sourceforge.net/projects/sox/files/sox/14.4.2/) and [`ffmpeg`](https://ffmpeg.org/download.html) audio processing tools
+  * Ensure the `sox`, `ffmpeg`, and `ffprobe` (part of ffmpeg) executables are available in your `PATH` environment variable
 
 ### Installing `synaudio-cli`
 * From a terminal, run `npm i -g synaudio-cli`
@@ -70,7 +70,7 @@ index.js <base-file> <comparison-file>
 
 syncs the <comparison_file> to the <base_file>
 
-Sync Options:
+Sync Options: (seconds are rounded to fit the sample rate)
   -R, --rectify         Rectify the audio before comparing for better cross-correlation  [boolean] [default: true]
   -T, --rate-tolerance  Duration in seconds describing how much +- the rate might differ from the base file.  [number] [default: 0.5]
   -L, --sample-length   Duration in seconds of each comparison file sample.  [number] [default: 0.125]
@@ -82,7 +82,7 @@ Output Options:
   -d, --delete-comparison      Delete the original comparison file after successfully syncing.  [boolean] [default: false]
   -n, --normalize              Normalize the output audio.  [boolean] [default: false]
   -m, --normalize-independent  Normalize the output audio independently for each channel.  [boolean] [default: false]
-  -e, --encode-options         Encode options supplied to `flac`  [string] [default: "--best"]
+  -e, --encode-options         Encode options supplied to `ffmpeg` when encoding the output file.  [string]
   -r, --rename-string          String to insert in the synced file before the extension. i.e. comparison.flac -> comparison.synced.flac  [string] [default: ".synced"]
 
 Positionals:
@@ -90,8 +90,7 @@ Positionals:
   comparison-file  File that will be synced against the base file.  [string]
 
 Options:
-      --help          Show help  [boolean]
-      --version       Show version number  [boolean]
-  -t, --threads       Number of threads to spawn while comparing audio.  [number] [default: 16]
-      --flac-threads  Number of threads to spawn while encoding using `flac`. Set to 1 to disable threading.  [number] [default: 16]
+      --help     Show help  [boolean]
+      --version  Show version number  [boolean]
+  -t, --threads  Number of threads to spawn while comparing audio.  [number] [default: 16]
 ```

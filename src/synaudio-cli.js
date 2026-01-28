@@ -9,6 +9,13 @@ import {
   roundToSampleRate,
 } from "./utilities.js";
 
+const ffmpegBitdepths = {
+  8: "s8",
+  16: "s16le",
+  24: "s24le",
+  32: "s32le",
+};
+
 const trimAndResample = async (
   inputFile,
   outputFile,
@@ -21,7 +28,6 @@ const trimAndResample = async (
   normalize,
   normalizeIndependent,
   encodeOptions,
-  flacThreads,
 ) => {
   const tempFileName = getTempFile();
   const tempFiles = [];
@@ -104,19 +110,28 @@ const trimAndResample = async (
       bitDepth,
       "-",
     ]);
-    const { promise: flacPromise, stdin: flacStdin } = runCmd("flac", [
-      "-s",
-      "--endian=little",
-      "--sign=signed",
-      "--bps=" + bitDepth,
-      "--channels=" + channels,
-      "--sample-rate=" + sampleRate,
-      "--lax",
-      encodeOptions,
-      ...(flacThreads > 1 ? ["-j", flacThreads] : []),
-      "-",
+
+    const encodeOptionsList = encodeOptions ? encodeOptions.split(" ") : [];
+    // default flac compression to level 12
+    if (
+      !encodeOptionsList.includes("-compression_level") &&
+      outputFile.endsWith("flac")
+    ) {
+      encodeOptionsList.push("-compression_level", "12");
+    }
+
+    const { promise: flacPromise, stdin: flacStdin } = runCmd("ffmpeg", [
+      "-v",
+      "error",
       "-f",
-      "-o",
+      ffmpegBitdepths[bitDepth],
+      "-ac",
+      channels,
+      "-ar",
+      sampleRate,
+      "-i",
+      "pipe:0",
+      ...encodeOptionsList,
       outputFile,
     ]);
     soxStdout.pipe(flacStdin);
@@ -132,7 +147,6 @@ export const syncResampleEncode = async ({
   baseFile,
   comparisonFile,
   threads,
-  flacThreads,
   sampleLength,
   sampleGap,
   startRange,
@@ -232,7 +246,6 @@ export const syncResampleEncode = async ({
     normalize,
     normalizeIndependent,
     encodeOptions,
-    flacThreads,
   );
 
   if (deleteComparison) {
